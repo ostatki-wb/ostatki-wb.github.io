@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Остатки WB</title>
+<meta name="description" content="Остатки и карточки Wildberries: отчёт по ярлыкам, выгрузка в Excel, объединение карточек. Работает в вашем браузере.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%237a3ff2'/%3E%3Cpath d='M8 22V10h4v12zm6 0V14h4v8zm6 0v-6h4v6z' fill='%23fff'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+<script src="vendor/exceljs.min.js" defer></script>
+<script type="module" src="js/app.js"></script>
+</head>
+<body>
+<header>
+  <h1>Остатки WB</h1>
+  <select id="shopSelect" title="Магазин WB"></select>
+  <span class="upd" id="upd"></span>
+  <span class="sp"></span>
+  <button id="btnRefresh" class="primary">Обновить данные</button>
+  <button id="btnShops">Магазины</button>
+</header>
+
+<main>
+  <div id="welcome" class="panel" style="display:none">
+    <h2>Добро пожаловать</h2>
+    <p>Здесь можно смотреть остатки своих товаров на Wildberries по категориям и ярлыкам, выгружать их в Excel и объединять карточки.</p>
+    <p class="muted">Всё работает прямо в этом браузере: токен и данные хранятся только у вас и отправляются только в WB.</p>
+    <button class="primary" id="welcomeAdd">Добавить магазин</button>
+  </div>
+
+  <div id="workspace" style="display:none">
+    <nav class="tabs"><button data-tab="stocks">Остатки</button><button data-tab="cards">Карточки</button></nav>
+    <div id="status" class="status"></div>
+    <div id="notes" class="notes"></div>
+
+    <section id="tab-stocks">
+      <div class="panel">
+        <h2>1. Категория</h2>
+        <div class="row">
+          <select id="category"></select>
+          <span class="muted" id="catInfo"></span>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="row" style="margin-bottom:12px">
+          <h2 style="margin:0">2. Ярлыки</h2>
+          <div class="links">
+            <button class="ghost" id="allTags">Выбрать все</button>
+            <button class="ghost" id="noTags">Снять все</button>
+          </div>
+        </div>
+        <div class="chips" id="tags"></div>
+      </div>
+      <div class="panel">
+        <div class="row" style="margin-bottom:14px">
+          <h2 style="margin:0">3. Остатки</h2>
+          <label class="check" style="margin-left:12px"><input type="checkbox" id="zero"> показывать товары с нулевым остатком</label>
+          <span class="sp"></span>
+          <button id="btnExcel" class="primary" disabled>Скачать Excel</button>
+        </div>
+        <div class="summary" id="summary"></div>
+        <div class="grid" id="grid"><div class="empty">Выберите категорию и ярлыки</div></div>
+      </div>
+    </section>
+
+    <section id="tab-cards" style="display:none">
+      <div class="banner" id="shopBanner"></div>
+      <div class="panel">
+        <h2>1. Список карточек</h2>
+        <p class="muted" style="margin:0 0 10px">Каждая группа — одна будущая карточка (до 30 товаров одного предмета). Можно вставить текстом или загрузить Excel, где одна колонка — одна карточка: сверху название, ниже артикулы.</p>
+        <textarea id="cardsText" spellcheck="false" placeholder="Карточка 1: CN0139, CN0138, PWB0075
+Люди 2: PWB0079 PWB0068 PWA0078
+Микс море:
+PWB0085
+CWA8612
+PWA0063"></textarea>
+        <div class="row" style="margin-top:12px">
+          <button id="btnXlsx">Загрузить Excel…</button>
+          <input type="file" id="xlsxFile" accept=".xlsx" hidden>
+          <span class="muted" id="xlsxName"></span>
+          <span class="sp"></span>
+          <button id="btnPlan" class="primary">Проверить</button>
+        </div>
+      </div>
+      <div class="panel plan" id="planPanel" style="display:none">
+        <div class="row" style="margin-bottom:12px">
+          <h2 style="margin:0">2. Что будет сделано</h2>
+          <span class="sp"></span>
+          <button id="btnRun" class="primary" disabled>Выполнить</button>
+        </div>
+        <div class="summary" id="planSummary"></div>
+        <ul class="msgs err" id="planErrors"></ul>
+        <ul class="msgs warn" id="planWarnings"></ul>
+        <div class="scroll"><table id="planTable"></table></div>
+      </div>
+      <div class="panel" id="jobPanel" style="display:none">
+        <h2 id="jobTitle">Выполнение</h2>
+        <div id="jobStatus" style="margin-bottom:10px"></div>
+        <div class="log" id="jobLog"></div>
+        <div id="jobResult" style="margin-top:12px"></div>
+      </div>
+      <div class="panel">
+        <div class="row" style="margin-bottom:6px">
+          <h2 style="margin:0">История и откат</h2>
+          <span class="sp"></span>
+          <button class="ghost" id="btnSnapFile">Откатить из файла…</button>
+          <input type="file" id="snapFile" accept=".json" hidden>
+        </div>
+        <p class="muted" style="margin:0 0 6px">Перед каждым выполнением сохраняется снимок «как было». «Откатить» соберёт эти товары обратно так, как они лежали (номера карточек WB выдаст новые). Снимок можно скачать файлом на всякий случай.</p>
+        <div id="snaps"><div class="muted">Пока ничего не выполнялось.</div></div>
+      </div>
+    </section>
+  </div>
+</main>
+
+<div class="modal" id="shopsModal">
+  <div class="dialog">
+    <div class="row" style="margin-bottom:8px"><h3 style="margin:0">Магазины</h3><span class="sp"></span><button class="ghost" id="closeShops">Закрыть</button></div>
+    <div id="shopList"></div>
+    <h3 id="shopFormTitle" style="margin-top:18px">Добавить магазин</h3>
+    <div class="field">
+      <label>Название (как вам удобно)</label>
+      <input type="text" id="shopName" placeholder="Например: Мой магазин">
+    </div>
+    <div class="field">
+      <label>Токен WB API</label>
+      <input type="password" id="shopToken" placeholder="Вставьте токен" autocomplete="off">
+      <div class="muted" id="shopTokenHint" style="margin-top:6px"></div>
+    </div>
+    <details class="howto">
+      <summary>Где взять токен</summary>
+      <ol>
+        <li>В кабинете WB: «Профиль» → «Настройки» → «Доступ к API» → «Создать токен».</li>
+        <li>Категории: <b>Контент</b> и <b>Аналитика</b>.</li>
+        <li>Если нужны только остатки и Excel — отметьте «Только чтение». Для объединения карточек «Только чтение» не ставьте.</li>
+        <li>Скопируйте токен целиком и вставьте сюда.</li>
+      </ol>
+    </details>
+    <div class="field">
+      <label>Какой остаток показывать</label>
+      <select id="shopSource"></select>
+      <div class="muted" style="margin-top:6px">По умолчанию — все склады, это ровно колонка «Остаток» в «Товары и цены».</div>
+    </div>
+    <div class="row" style="justify-content:flex-end">
+      <button class="ghost" id="cancelShop" style="display:none">Отмена</button>
+      <button class="primary" id="saveShop">Добавить</button>
+    </div>
+    <p class="muted privacy">Токены и данные хранятся только в этом браузере на этом компьютере и отправляются только в WB. Если за компьютером работает несколько человек под одной учётной записью, они увидят магазины друг друга.</p>
+  </div>
+</div>
+</body>
+</html>
