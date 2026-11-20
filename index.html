@@ -58,7 +58,15 @@
           <span class="sp"></span>
           <button id="btnExcel" class="primary" disabled>Скачать Excel</button>
         </div>
-        <div class="summary" id="summary"></div>
+        <div class="row stock-details">
+          <div class="summary" id="summary"></div>
+          <label class="stock-sort muted" id="stockSortControl" hidden>Сортировка
+            <select id="stockSort">
+              <option value="stock">По остатку</option>
+              <option value="orders">По заказам в день</option>
+            </select>
+          </label>
+        </div>
         <div class="grid" id="grid"><div class="empty">Выберите категорию и ярлыки</div></div>
       </div>
     </section>

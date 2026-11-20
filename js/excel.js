@@ -9,6 +9,7 @@ const F_REG = { name: "Arial", size: 11 };
 const FILL_HEAD = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4472C4" } };
 const FILL_SUB = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
 const CENTER = { horizontal: "center" };
+const ORDERS_HEADER = "Заказов в день";
 
 export function colLetter(n) {
   let s = "";
@@ -17,14 +18,16 @@ export function colLetter(n) {
 }
 
 /** Один лист «Остатки»: у каждого ярлыка блок Артикул / Кол-во (в алмазке, рисовании и вышивке —
- *  Артикул / Название / Кол-во), между блоками пустой узкий столбец, внизу «Итого SKU:» с COUNTA.
+ *  Артикул / Название / Кол-во). При наличии периода добавляется «Заказов в день».
  *  Возвращает содержимое .xlsx (ArrayBuffer в браузере, Buffer в Node). */
-export async function toXlsx(groups, ExcelJS) {
+export async function toXlsx(groups, ExcelJS, orderDates = null) {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Остатки");
   let col = 1;
   for (const g of groups) {
     const cols = [["Артикул", "article", 14]].concat(g.named ? [["Название", "name", 30]] : [], [["Кол-во", "qty", 8]]);
+    const qtyCol = col + cols.length - 1;
+    if (orderDates) cols.push([ORDERS_HEADER, "ordersPerDay", 19]);
     const first = col, last = col + cols.length - 1;
     const a = colLetter(first);
     cols.forEach(([, , w], k) => { ws.getColumn(first + k).width = w; });
@@ -35,9 +38,10 @@ export async function toXlsx(groups, ExcelJS) {
     }
     ws.getCell(1, first).value = g.tag;
     ws.mergeCells(1, first, 1, last);
-    cols.forEach(([title], k) => {
+    cols.forEach(([title, key], k) => {
       const cell = ws.getCell(2, first + k);
       cell.value = title; cell.font = F_BOLD; cell.fill = FILL_SUB; cell.alignment = CENTER; cell.border = BORDER;
+      if (key === "ordersPerDay") cell.note = `Период заказов: ${orderDates}. Все модели продаж.`;
     });
     let r = 3;
     for (const row of g.rows) {
@@ -45,6 +49,7 @@ export async function toXlsx(groups, ExcelJS) {
         const cell = ws.getCell(r, first + k);
         const v = row[key];
         cell.value = v === "" || v === undefined ? null : v;
+        if (key === "ordersPerDay") cell.numFmt = "0.00";
         cell.font = F_REG; cell.border = BORDER;
       });
       r++;
@@ -53,7 +58,7 @@ export async function toXlsx(groups, ExcelJS) {
     for (let c = first; c <= last; c++) {
       const cell = ws.getCell(r, c);
       if (c === first) cell.value = "Итого SKU:";
-      else if (c === last) cell.value = lastRow >= 3 ? { formula: `COUNTA(${a}3:${a}${lastRow})` } : 0;
+      else if (c === qtyCol) cell.value = lastRow >= 3 ? { formula: `COUNTA(${a}3:${a}${lastRow})` } : 0;
       cell.font = F_BOLD; cell.fill = FILL_SUB; cell.border = BORDER;
     }
     col = last + 2;
@@ -100,6 +105,7 @@ export async function parseXlsx(data, known, ExcelJS) {
   const groups = [];
   for (const c of [...cols.keys()].sort((x, y) => x - y)) {
     const vals = cols.get(c);
+    if (ws.name === "Остатки" && ["Кол-во", ORDERS_HEADER].includes(cellValue(ws.getCell(2, c)))) continue;
     if (vals.some(v => typeof v === "string" && v.trim().toLowerCase() === "название")) continue;
     let name = "", items = [];
     for (const v of vals) {

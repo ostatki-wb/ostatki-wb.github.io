@@ -32,6 +32,11 @@ select,input[type=password],input[type=text]{font:inherit;padding:9px 12px;borde
 .summary{display:flex;gap:24px;align-items:baseline;flex-wrap:wrap;margin-bottom:12px}
 .summary b{font-size:22px}
 .summary span{color:var(--muted);font-size:13px}
+.stock-details{justify-content:space-between;margin-bottom:12px}
+.stock-details .summary{margin-bottom:0;row-gap:8px}
+.stock-sort:not([hidden]){display:flex;align-items:center;gap:8px}
+.stock-sort select{min-width:0;width:auto;padding:6px 8px;color:var(--ink)}
+.grid .orders-col{white-space:nowrap}
 .grid{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;align-items:flex-start}
 table{border-collapse:collapse;font-size:14px;min-width:190px;background:#fff}
 th,td{border:1px solid #c9cfdb;padding:4px 8px}
@@ -82,4 +87,5 @@ ul.msgs.err{color:var(--err)} ul.msgs.warn{color:#8a5a00}
   header,main{padding-left:16px;padding-right:16px}
   select,input[type=password],input[type=text]{min-width:0;width:100%}
   #shopSelect{width:auto;flex:1}
+  .grid .orders-col{white-space:normal}
 }

@@ -86,8 +86,9 @@ export function tagsForCategory(cache, subject) {
   return orderTags([...counts.keys()]).map(n => ({ name: n, count: counts.get(n), color: colors[n] || "" }));
 }
 
-export function build(cache, subject, tags, source, includeZero) {
+export function build(cache, subject, tags, source, includeZero, sortBy = "stock") {
   const stocks = stockMap(cache, source);
+  const orders = cache?.orders;
   const wanted = orderTags(tags);
   const groups = new Map(wanted.map(t => [t, []]));
   const named = isNamed(subject);
@@ -95,15 +96,23 @@ export function build(cache, subject, tags, source, includeZero) {
     if (c.subjectName !== subject) continue;
     const qty = parseInt(stocks[String(c.nmID)] || 0, 10);
     if (qty <= 0 && !includeZero) continue;
+    const count = orders?.counts?.[c.nmID];
+    const ordersPerDay = count == null ? undefined : count / orders.days;
     for (const t of (c.tags && c.tags.length ? c.tags : [NO_TAG])) {
       if (!groups.has(t)) continue;
-      const row = { article: c.vendorCode, nmID: c.nmID, qty };
+      const row = { article: c.vendorCode, nmID: c.nmID, qty, ordersPerDay };
       if (named) row.name = shortName(c.title, c.vendorCode);
       groups.get(t).push(row);
     }
   }
   return wanted.map(t => {
-    const rows = groups.get(t).sort((a, b) => (b.qty - a.qty) || cmp(a.article, b.article));
+    const rows = groups.get(t).sort((a, b) => {
+      if (sortBy === "orders") {
+        const difference = (b.ordersPerDay ?? -1) - (a.ordersPerDay ?? -1);
+        if (difference) return difference;
+      }
+      return (b.qty - a.qty) || cmp(a.article, b.article);
+    });
     return { tag: t, rows, sku: rows.length, total: rows.reduce((s, r) => s + r.qty, 0), named };
   });
 }
