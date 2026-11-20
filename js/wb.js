@@ -145,3 +145,40 @@ export async function fetchStocks(token, stockType = "", { progress = () => {}, 
   }
   return out;
 }
+
+// ---------- заказы ----------
+
+const ORDER_DAYS = 30;
+const moscowDate = new Intl.DateTimeFormat("sv-SE", {
+  timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit",
+});
+
+/** Заказанные единицы по артикулу WB за 30 календарных дней, по всем моделям продаж. */
+export async function fetchOrders(token, {
+  progress = () => {}, pause = 21000, now = new Date(), fetchImpl = globalThis.fetch,
+} = {}) {
+  const end = moscowDate.format(now);
+  const firstDay = new Date(end);
+  firstDay.setUTCDate(firstDay.getUTCDate() - (ORDER_DAYS - 1));
+  const start = firstDay.toISOString().slice(0, 10);
+  const limit = 1000;
+  const counts = {};
+  for (let offset = 0; ; offset += limit) {
+    const body = {
+      selectedPeriod: { start, end }, skipDeletedNm: true,
+      orderBy: { field: "orderCount", mode: "desc" }, limit, offset,
+    };
+    const res = await request("POST", ANALYTICS + "/api/analytics/v3/sales-funnel/products", token, body, { progress, fetchImpl });
+    const products = res?.data?.products;
+    if (!Array.isArray(products)) throw new WBError("WB вернул заказы в неожиданном формате (нет data.products).");
+    for (const item of products) {
+      const nmId = item.product?.nmId;
+      const count = item.statistic?.selected?.orderCount;
+      if (nmId != null && Number.isSafeInteger(count) && count >= 0) counts[nmId] = count;
+    }
+    if (products.length < limit) break;
+    progress(`Загружаю заказы: ${Object.keys(counts).length} товаров, жду ${pause / 1000} с (лимит WB)…`);
+    await sleep(pause);
+  }
+  return { start, end, days: ORDER_DAYS, counts };
+}

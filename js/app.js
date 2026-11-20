@@ -10,6 +10,9 @@ const $$ = s => [...document.querySelectorAll(s)];
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const nowStr = () => new Date().toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(",", "");
 
+const orderRateFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
+const displayDate = iso => iso.split("-").reverse().join(".");
+
 let st = S.getState();
 let cache = null;          // данные текущего магазина
 let selected = new Set();  // выбранные ярлыки
@@ -155,11 +158,19 @@ async function refresh() {
     progress("Загружаю остатки…");
     const source = s.source || "all";
     const stocks = { [source]: await W.fetchStocks(s.token, R.STOCK_TYPE[source], { progress }) };
+    progress("Загружаю заказы из «Воронки продаж»…");
+    let orders = null;
+    try {
+      orders = await W.fetchOrders(s.token, { progress });
+    } catch (e) {
+      notes.push(`Заказы не загрузились (${e.message}).`);
+    }
     if (!s.sellerName) { s.sellerName = await W.sellerName(s.token); save(); }
     const d = new Date(), p = n => String(n).padStart(2, "0");
+    if (shop()?.id !== s.id) return;
     cache = { updated: `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`,
-      cards, tags, stocks, notes };
-    if (shop() && shop().id === s.id) await S.kvSet(S.cacheKey(s.id), cache);
+      cards, tags, stocks, orders, notes };
+    await S.kvSet(S.cacheKey(s.id), cache);
     setStatus("", "");
   } catch (e) {
     setStatus("err", esc(e.message));
@@ -218,19 +229,35 @@ function currentReport() {
   if (!cache || !$("#category").value || !selected.size) return null;
   const stocks = cache.stocks || {};
   const source = (s.source || "all") in stocks ? (s.source || "all") : (Object.keys(stocks)[0] || "all");
-  return { groups: R.build(cache, $("#category").value, [...selected], source, $("#zero").checked), source: R.SOURCES[source] || source };
+  const orders = cache.orders;
+  const orderDates = orders?.start ? `${displayDate(orders.start)} – ${displayDate(orders.end)} (МСК)` : null;
+  return {
+    groups: R.build(cache, $("#category").value, [...selected], source, $("#zero").checked, $("#stockSort").value),
+    source: R.SOURCES[source] || source, orderDates,
+  };
 }
 
 function renderReport(rep) {
   const grid = $("#grid"), sum = $("#summary");
+  $("#stockSortControl").hidden = !rep?.groups.length;
   if (!rep || !rep.groups.length) { grid.innerHTML = `<div class="empty">Выберите категорию и ярлыки</div>`; sum.innerHTML = ""; $("#btnExcel").disabled = true; return; }
   const sku = rep.groups.reduce((a, g) => a + g.sku, 0), tot = rep.groups.reduce((a, g) => a + g.total, 0);
-  sum.innerHTML = `<div><b>${sku}</b> <span>артикулов</span></div><div><b>${tot}</b> <span>шт. всего</span></div><div><span>Источник: ${esc(rep.source)}</span></div>`;
+  $("#stockSort").disabled = !rep.groups.some(g => g.rows.some(r => r.ordersPerDay != null));
+  const orderPeriod = rep.orderDates
+    ? `Заказы по всем моделям за ${esc(rep.orderDates)}`
+    : "Обновите данные, чтобы загрузить заказы";
+  sum.innerHTML = `<div><b>${sku}</b> <span>артикулов</span></div><div><b>${tot}</b> <span>шт. всего</span></div><div><span>Источник остатков: ${esc(rep.source)}</span></div><div><span>${orderPeriod}</span></div>`;
   grid.innerHTML = rep.groups.map(g => {
-    const n = g.named ? 3 : 2;
-    return `<table><thead><tr><th colspan="${n}">${esc(g.tag)}</th></tr><tr><th>Артикул</th>${g.named ? "<th>Название</th>" : ""}<th>Кол-во</th></tr></thead>
-      <tbody>${g.rows.map(r => `<tr><td>${esc(r.article)}</td>${g.named ? `<td>${esc(r.name || "")}</td>` : ""}<td class="q">${r.qty}</td></tr>`).join("") || `<tr><td colspan="${n}" class="muted">нет товаров</td></tr>`}</tbody>
-      <tfoot><tr><td>Итого SKU:</td>${g.named ? "<td></td>" : ""}<td class="q">${g.sku}</td></tr></tfoot></table>`;
+    const n = g.named ? 4 : 3;
+    const rows = g.rows.map(r => {
+      const rate = r.ordersPerDay == null
+        ? '<span aria-label="Нет данных о заказах">—</span>'
+        : orderRateFormat.format(r.ordersPerDay);
+      return `<tr><td>${esc(r.article)}</td>${g.named ? `<td>${esc(r.name || "")}</td>` : ""}<td class="q">${r.qty}</td><td class="q">${rate}</td></tr>`;
+    });
+    return `<table><thead><tr><th colspan="${n}">${esc(g.tag)}</th></tr><tr><th scope="col">Артикул</th>${g.named ? '<th scope="col">Название</th>' : ""}<th scope="col">Кол-во</th><th scope="col" class="orders-col">Заказов в день</th></tr></thead>
+      <tbody>${rows.join("") || `<tr><td colspan="${n}" class="muted">нет товаров</td></tr>`}</tbody>
+      <tfoot><tr><td>Итого SKU:</td>${g.named ? "<td></td>" : ""}<td class="q">${g.sku}</td><td></td></tr></tfoot></table>`;
   }).join("");
   $("#btnExcel").disabled = false;
 }
@@ -239,7 +266,7 @@ async function downloadExcel() {
   const rep = currentReport();
   if (!rep) return;
   try {
-    const buf = await toXlsx(rep.groups, window.ExcelJS);
+    const buf = await toXlsx(rep.groups, window.ExcelJS, rep.orderDates);
     const d = new Date(), p = n => String(n).padStart(2, "0");
     saveFile(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
       `Остатки ${p(d.getDate())}.${p(d.getMonth() + 1)} ${$("#category").value}.xlsx`);
@@ -445,6 +472,7 @@ function wire() {
   $$("nav.tabs button").forEach(b => b.onclick = () => showTab(b.dataset.tab));
   $("#category").onchange = () => renderStocks();
   $("#zero").onchange = () => renderReport(currentReport());
+  $("#stockSort").onchange = () => renderReport(currentReport());
   $("#allTags").onclick = () => { $$(".chip").forEach(c => { selected.add(c.dataset.n); c.classList.add("on"); }); saveTags(); renderReport(currentReport()); };
   $("#noTags").onclick = () => { selected.clear(); $$(".chip").forEach(c => c.classList.remove("on")); saveTags(); renderReport(currentReport()); };
   $("#btnExcel").onclick = downloadExcel;
