@@ -21,6 +21,12 @@
 </header>
 
 <main>
+  <div id="localFileHelp" class="panel" hidden>
+    <h2>Остатки WB</h2>
+    <p>Эта страница открыта как файл. Для работы сайта нужен локальный сервер.</p>
+    <p><a href="http://127.0.0.1:8790/">Открыть локальный сайт</a></p>
+    <p class="muted">Если сервер ещё не запущен, выполните <code>npm run serve</code> в папке проекта.</p>
+  </div>
   <div id="welcome" class="panel" style="display:none">
     <h2>Добро пожаловать</h2>
     <p>Здесь можно смотреть остатки своих товаров на Wildberries по категориям и ярлыкам, выгружать их в Excel и объединять карточки.</p>
@@ -30,7 +36,7 @@
 
   <div id="workspace" style="display:none">
     <nav class="tabs"><button data-tab="stocks">Остатки</button><button data-tab="cards">Карточки</button></nav>
-    <div id="status" class="status"></div>
+    <div id="status" class="status" role="status"></div>
     <div id="notes" class="notes"></div>
 
     <section id="tab-stocks">
@@ -38,7 +44,6 @@
         <h2>1. Категория</h2>
         <div class="row">
           <select id="category"></select>
-          <span class="muted" id="catInfo"></span>
         </div>
       </div>
       <div class="panel">
@@ -52,12 +57,29 @@
         <div class="chips" id="tags"></div>
       </div>
       <div class="panel">
-        <div class="row" style="margin-bottom:14px">
+        <div class="row stock-heading">
           <h2 style="margin:0">3. Остатки</h2>
-          <label class="check" style="margin-left:12px"><input type="checkbox" id="zero"> показывать товары с нулевым остатком</label>
-          <span class="sp"></span>
-          <button id="btnExcel" class="primary" disabled>Скачать Excel</button>
+          <label class="check"><input type="checkbox" id="zero"> Показывать товары с нулевым остатком</label>
         </div>
+        <form id="orderForm" class="order-form" novalidate>
+          <fieldset id="orderControls" class="row order-controls" disabled>
+            <label class="order-field">Период заказов
+              <select id="orderPreset">
+                <option value="7">Неделя (7 дней)</option>
+                <option value="30" selected>Месяц (30 дней)</option>
+                <option value="90">Квартал (90 дней)</option>
+                <option value="365">Год (365 дней)</option>
+                <option value="custom">Свой период</option>
+              </select>
+            </label>
+            <div id="orderDates" class="row" hidden>
+              <label class="order-field">С <input id="orderStart" type="date" aria-describedby="periodMessage"></label>
+              <label class="order-field">По <input id="orderEnd" type="date" aria-describedby="periodMessage"></label>
+            </div>
+            <button type="submit">Применить</button>
+          </fieldset>
+          <p id="periodMessage" class="stock-message muted" role="status" hidden></p>
+        </form>
         <div class="row stock-details">
           <div class="summary" id="summary"></div>
           <label class="stock-sort muted" id="stockSortControl" hidden>Сортировка
@@ -67,6 +89,17 @@
             </select>
           </label>
         </div>
+        <div class="row stock-export">
+          <button id="btnExcel" class="primary" disabled>Скачать Excel</button>
+          <button id="btnCardExcel" aria-describedby="cardExportHint" disabled>Скачать по карточкам</button>
+          <div class="row" role="group" aria-label="Столбцы Excel">
+            <span class="muted">В Excel</span>
+            <label class="check"><input type="checkbox" id="withPhotos" disabled> Главное фото</label>
+            <label class="check"><input type="checkbox" id="withOrders" checked disabled> Заказов в день</label>
+          </div>
+        </div>
+        <p id="cardExportHint" class="stock-message muted">В отчёте по карточкам видны все варианты. Галочка нулевых остатков добавляет карточки, у которых на складе нет ни одного варианта.</p>
+        <p id="exportMessage" class="stock-message muted" role="status" hidden></p>
         <div class="grid" id="grid"><div class="empty">Выберите категорию и ярлыки</div></div>
       </div>
     </section>
@@ -156,5 +189,11 @@ PWA0063"></textarea>
     <p class="muted privacy">Токены и данные хранятся только в этом браузере на этом компьютере и отправляются только в WB. Если за компьютером работает несколько человек под одной учётной записью, они увидят магазины друг друга.</p>
   </div>
 </div>
+<script>
+  if (location.protocol === "file:") {
+    document.querySelector("header").style.display = "none";
+    document.getElementById("localFileHelp").hidden = false;
+  }
+</script>
 </body>
 </html>

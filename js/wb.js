@@ -55,29 +55,43 @@ export async function request(method, url, token, body, { retries = 3, progress 
 // ---------- карточки и ярлыки (раздел «Товары и цены») ----------
 
 /** Все карточки продавца, постранично по 100. subjectIds — только эти предметы. */
-export async function fetchCards(token, { progress = () => {}, subjectIds = null, pause = 700 } = {}) {
-  const cards = [], seen = new Set();
-  let cursor = { limit: 100 };
+export async function fetchCards(token, {
+  progress = () => {}, subjectIds = null, pause = 750, fetchImpl = globalThis.fetch,
+} = {}) {
+  const cards = [], seen = new Set(), seenCursors = new Set();
+  const limit = 100;
+  let cursor = { limit };
   const filter = { withPhoto: -1 };
   if (subjectIds && subjectIds.length) filter.objectIDs = subjectIds.map(Number);
   for (;;) {
     const res = (await request("POST", CONTENT + "/content/v2/get/cards/list", token,
-      { settings: { cursor, filter } }, { progress })) || {};
-    const batch = res.cards || [];
+      { settings: { cursor, filter } }, { progress, fetchImpl })) || {};
+    const batch = res.cards;
+    if (!Array.isArray(batch)) throw new WBError("WB вернул каталог в неожиданном формате (нет списка карточек).");
     for (const c of batch) {
       if (seen.has(c.nmID)) continue;     // курсор WB иногда повторяет карточки на стыке страниц
       seen.add(c.nmID);
+      const photo = c.photos?.[0];
       cards.push({
         nmID: c.nmID, imtID: c.imtID, vendorCode: c.vendorCode || "",
         subjectID: c.subjectID, subjectName: c.subjectName || "Без категории",
         title: c.title || "", tags: (c.tags || []).map(t => t.name).filter(Boolean),
+        photoUrl: photo?.c516x688 || photo?.big || photo?.c246x328 || "",
       });
     }
     progress(`Загружаю карточки «Товары и цены»: ${cards.length}`);
-    const cur = res.cursor || {};
-    if (batch.length < 100 || !cur.updatedAt || (cur.total || 0) < 100) break;
-    cursor = { limit: 100, updatedAt: cur.updatedAt, nmID: cur.nmID };
-    await sleep(pause);                    // лимит Content API: 100 запросов в минуту
+    const next = res.cursor;
+    const total = next?.total ?? batch.length;
+    if (!Number.isInteger(total) || total < 0) throw new WBError("WB вернул некорректный размер страницы каталога.");
+    if (total < limit) break;
+    if (!next?.updatedAt || !Number.isSafeInteger(next.nmID) || next.nmID <= 0) {
+      throw new WBError("WB не указал, с какой карточки продолжить загрузку каталога. Повторите обновление.");
+    }
+    const cursorKey = JSON.stringify([next.updatedAt, next.nmID]);
+    if (seenCursors.has(cursorKey)) throw new WBError("WB повторил страницу каталога. Повторите обновление.");
+    seenCursors.add(cursorKey);
+    cursor = { limit, updatedAt: next.updatedAt, nmID: next.nmID };
+    await sleep(pause);
   }
   return cards;
 }
@@ -148,19 +162,43 @@ export async function fetchStocks(token, stockType = "", { progress = () => {}, 
 
 // ---------- заказы ----------
 
-const ORDER_DAYS = 30;
+export const MAX_ORDER_DAYS = 365;
+const DAY_MS = 24 * 60 * 60 * 1000;
 const moscowDate = new Intl.DateTimeFormat("sv-SE", {
   timeZone: "Europe/Moscow", year: "numeric", month: "2-digit", day: "2-digit",
 });
 
-/** Заказанные единицы по артикулу WB за 30 календарных дней, по всем моделям продаж. */
+function dateValue(date) {
+  const value = /^\d{4}-\d{2}-\d{2}$/.test(date) ? Date.parse(date) : NaN;
+  return Number.isFinite(value) && new Date(value).toISOString().slice(0, 10) === date ? value : NaN;
+}
+
+/** Границы и число календарных дней, включая обе даты. */
+export function orderPeriod(selection = { days: 30 }, now = new Date()) {
+  const today = moscowDate.format(now);
+  const todayValue = dateValue(today);
+  const earliest = todayValue - (MAX_ORDER_DAYS - 1) * DAY_MS;
+  if (!("start" in selection || "end" in selection)) {
+    const { days } = selection;
+    if (!Number.isInteger(days) || days < 1 || days > MAX_ORDER_DAYS) throw new RangeError("Выберите период в пределах последних 365 дней.");
+    const start = new Date(todayValue - (days - 1) * DAY_MS).toISOString().slice(0, 10);
+    return { start, end: today, days };
+  }
+  const { start, end } = selection;
+  if (!start || !end) throw new RangeError("Укажите начало и конец периода.");
+  const first = dateValue(start), last = dateValue(end);
+  if (!Number.isFinite(first) || !Number.isFinite(last)) throw new RangeError("Укажите существующие даты.");
+  if (first > last) throw new RangeError("Дата начала должна быть раньше даты окончания или совпадать с ней.");
+  if (last > todayValue) throw new RangeError("Конец периода не может быть позже сегодняшней даты по Москве.");
+  if (first < earliest) throw new RangeError("Выберите даты в пределах последних 365 дней.");
+  return { start, end, days: (last - first) / DAY_MS + 1 };
+}
+
+/** Заказанные единицы по артикулу WB за выбранный период, по всем моделям продаж. */
 export async function fetchOrders(token, {
-  progress = () => {}, pause = 21000, now = new Date(), fetchImpl = globalThis.fetch,
+  period, progress = () => {}, pause = 21000, now = new Date(), fetchImpl = globalThis.fetch,
 } = {}) {
-  const end = moscowDate.format(now);
-  const firstDay = new Date(end);
-  firstDay.setUTCDate(firstDay.getUTCDate() - (ORDER_DAYS - 1));
-  const start = firstDay.toISOString().slice(0, 10);
+  const { start, end, days } = orderPeriod(period, now);
   const limit = 1000;
   const counts = {};
   for (let offset = 0; ; offset += limit) {
@@ -180,5 +218,5 @@ export async function fetchOrders(token, {
     progress(`Загружаю заказы: ${Object.keys(counts).length} товаров, жду ${pause / 1000} с (лимит WB)…`);
     await sleep(pause);
   }
-  return { start, end, days: ORDER_DAYS, counts };
+  return { start, end, days, counts };
 }

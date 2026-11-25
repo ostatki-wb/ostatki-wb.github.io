@@ -81,9 +81,35 @@ export function tagsForCategory(cache, subject) {
   const counts = new Map();
   for (const c of (cache && cache.cards) || []) {
     if (c.subjectName !== subject) continue;
-    for (const n of (c.tags && c.tags.length ? c.tags : [NO_TAG])) counts.set(n, (counts.get(n) || 0) + 1);
+    for (const n of cardTags(c)) counts.set(n, (counts.get(n) || 0) + 1);
   }
   return orderTags([...counts.keys()]).map(n => ({ name: n, count: counts.get(n), color: colors[n] || "" }));
+}
+
+function cardTags(card) {
+  return card.tags?.length ? card.tags : [NO_TAG];
+}
+
+function stockRow(card, stocks, orders) {
+  const article = String(card.vendorCode ?? "");
+  const count = orders?.counts?.[card.nmID];
+  return {
+    article: article.trim() ? article : String(card.nmID),
+    nmID: card.nmID,
+    qty: parseInt(stocks[String(card.nmID)] || 0, 10),
+    ordersPerDay: count == null ? undefined : count / orders.days,
+    photoUrl: card.photoUrl,
+  };
+}
+
+function compareRows(sortBy) {
+  return (a, b) => {
+    if (sortBy === "orders") {
+      const difference = (b.ordersPerDay ?? -1) - (a.ordersPerDay ?? -1);
+      if (difference) return difference;
+    }
+    return (b.qty - a.qty) || cmp(a.article, b.article);
+  };
 }
 
 export function build(cache, subject, tags, source, includeZero, sortBy = "stock") {
@@ -94,25 +120,50 @@ export function build(cache, subject, tags, source, includeZero, sortBy = "stock
   const named = isNamed(subject);
   for (const c of (cache && cache.cards) || []) {
     if (c.subjectName !== subject) continue;
-    const qty = parseInt(stocks[String(c.nmID)] || 0, 10);
-    if (qty <= 0 && !includeZero) continue;
-    const count = orders?.counts?.[c.nmID];
-    const ordersPerDay = count == null ? undefined : count / orders.days;
-    for (const t of (c.tags && c.tags.length ? c.tags : [NO_TAG])) {
-      if (!groups.has(t)) continue;
-      const row = { article: c.vendorCode, nmID: c.nmID, qty, ordersPerDay };
-      if (named) row.name = shortName(c.title, c.vendorCode);
-      groups.get(t).push(row);
-    }
+    const row = stockRow(c, stocks, orders);
+    if (row.qty <= 0 && !includeZero) continue;
+    if (named) row.name = shortName(c.title, c.vendorCode);
+    for (const t of cardTags(c)) groups.get(t)?.push(row);
   }
+  const compare = compareRows(sortBy);
   return wanted.map(t => {
-    const rows = groups.get(t).sort((a, b) => {
-      if (sortBy === "orders") {
-        const difference = (b.ordersPerDay ?? -1) - (a.ordersPerDay ?? -1);
-        if (difference) return difference;
-      }
-      return (b.qty - a.qty) || cmp(a.article, b.article);
-    });
+    const rows = groups.get(t).sort(compare);
     return { tag: t, rows, sku: rows.length, total: rows.reduce((s, r) => s + r.qty, 0), named };
   });
+}
+
+export function summarize(groups) {
+  const quantities = new Map();
+  for (const group of groups) {
+    for (const row of group.rows) quantities.set(row.nmID, row.qty);
+  }
+  let total = 0;
+  for (const qty of quantities.values()) total += qty;
+  return { sku: quantities.size, total };
+}
+
+export function buildCardGroups(cache, subject, tags, source, includeZero, sortBy = "stock") {
+  const wanted = new Set(tags);
+  const stocks = stockMap(cache, source);
+  const members = new Map();
+  const seen = new Set();
+  for (const card of cache?.cards || []) {
+    const imtID = Number(card.imtID), nmID = Number(card.nmID);
+    if (card.subjectName !== subject || !Number.isSafeInteger(imtID) || imtID <= 0
+        || !Number.isSafeInteger(nmID) || nmID <= 0 || seen.has(nmID)) continue;
+    seen.add(nmID);
+    if (!members.has(imtID)) members.set(imtID, []);
+    members.get(imtID).push(card);
+  }
+
+  const groups = [];
+  const compare = compareRows(sortBy);
+  for (const [, cards] of [...members].sort(([a], [b]) => a - b)) {
+    // Фильтры отбирают карточки целиком. В состав каждой выбранной карточки входят и товары без остатка.
+    if (cards.length < 2 || !cards.some(c => cardTags(c).some(t => wanted.has(t)))) continue;
+    const rows = cards.map(c => stockRow(c, stocks, cache.orders));
+    if (!includeZero && !rows.some(row => row.qty > 0)) continue;
+    groups.push({ name: `Карточка ${groups.length + 1}`, rows: rows.sort(compare) });
+  }
+  return groups;
 }

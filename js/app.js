@@ -4,6 +4,7 @@ import * as R from "./report.js";
 import * as C from "./cards.js";
 import * as S from "./store.js";
 import { toXlsx, parseXlsx } from "./excel.js";
+import { loadPhotos } from "./photos.js";
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -11,7 +12,9 @@ const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": 
 const nowStr = () => new Date().toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }).replace(",", "");
 
 const orderRateFormat = new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 2 });
+const ORDER_LOAD_ERROR = "Заказы не загрузились (";
 const displayDate = iso => iso.split("-").reverse().join(".");
+const orderDatesLabel = orders => orders?.start ? `${displayDate(orders.start)} – ${displayDate(orders.end)} (МСК)` : null;
 
 let st = S.getState();
 let cache = null;          // данные текущего магазина
@@ -25,6 +28,7 @@ let xlsxData = null;
 const shop = () => st.shops.find(s => s.id === st.current) || null;
 const save = () => S.saveState(st);
 const ui = (k, v) => { if (v === undefined) return st.ui[k]; st.ui[k] = v; save(); };
+const orderSelection = s => ui(`orders:${s.id}`) || { days: 30 };
 
 function setStatus(kind, html) { const el = $("#status"); el.className = "status " + (kind || ""); el.innerHTML = html || ""; }
 function setBusy(b) {
@@ -32,6 +36,8 @@ function setBusy(b) {
   $("#btnRefresh").disabled = b;
   $("#btnPlan").disabled = b;
   $("#shopSelect").disabled = b;
+  $("#btnShops").disabled = b;
+  syncStockControls();
   if (plan) renderPlan();
 }
 window.addEventListener("beforeunload", e => { if (busy) { e.preventDefault(); e.returnValue = ""; } });
@@ -47,11 +53,23 @@ function renderShopSelect() {
 }
 
 async function selectShop(id) {
+  setBusy(true);
   st.current = id; save();
-  cache = id ? (await S.kvGet(S.cacheKey(id))) || null : null;
+  cache = null;
   plan = null; planInput = null; job = null; xlsxData = null;
-  renderShopSelect();
-  await renderAll();
+  $("#category").value = "";
+  $("#snaps").replaceChildren();
+  $("#cardsText").value = "";
+  $("#xlsxName").textContent = "";
+  try {
+    cache = id ? (await S.kvGet(S.cacheKey(id))) || null : null;
+    renderShopSelect();
+    if (shop()) fillOrderPeriodForm();
+    await renderAll();
+  } finally {
+    setBusy(false);
+  }
+  if (shop() && !cache) setStatus("info", "Нажмите «Обновить данные», чтобы загрузить товары и остатки из WB.");
 }
 
 function tokenHint(t) { return t && t.length > 12 ? `…${t.slice(-6)}` : ""; }
@@ -159,11 +177,12 @@ async function refresh() {
     const source = s.source || "all";
     const stocks = { [source]: await W.fetchStocks(s.token, R.STOCK_TYPE[source], { progress }) };
     progress("Загружаю заказы из «Воронки продаж»…");
-    let orders = null;
+    let orders = cache?.orders || null;
     try {
-      orders = await W.fetchOrders(s.token, { progress });
+      orders = await W.fetchOrders(s.token, { period: orderSelection(s), progress });
     } catch (e) {
-      notes.push(`Заказы не загрузились (${e.message}).`);
+      const previous = orders ? ` Показаны сохранённые заказы за ${orderDatesLabel(orders)}.` : "";
+      notes.push(`${ORDER_LOAD_ERROR}${e.message}).${previous}`);
     }
     if (!s.sellerName) { s.sellerName = await W.sellerName(s.token); save(); }
     const d = new Date(), p = n => String(n).padStart(2, "0");
@@ -171,6 +190,7 @@ async function refresh() {
     cache = { updated: `${p(d.getDate())}.${p(d.getMonth() + 1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`,
       cards, tags, stocks, orders, notes };
     await S.kvSet(S.cacheKey(s.id), cache);
+    stockMessage("#periodMessage");
     setStatus("", "");
   } catch (e) {
     setStatus("err", esc(e.message));
@@ -182,6 +202,89 @@ async function refresh() {
 
 // ---------- вкладка «Остатки» ----------
 
+function stockMessage(selector, message = "", error = false) {
+  const el = $(selector);
+  el.classList.toggle("error", error);
+  el.hidden = !message;
+  el.textContent = message;
+}
+
+function syncStockControls() {
+  const canExport = Boolean(cache && $("#category").value && selected.size && !busy);
+  $("#orderControls").disabled = busy || !cache;
+  $("#btnExcel").disabled = !canExport;
+  $("#btnCardExcel").disabled = !canExport;
+  $("#withPhotos").disabled = !canExport;
+  $("#withOrders").disabled = !canExport;
+}
+
+function updateOrderDateFields() {
+  const custom = $("#orderPreset").value === "custom";
+  $("#orderDates").hidden = !custom;
+  if (custom) {
+    const range = W.orderPeriod({ days: W.MAX_ORDER_DAYS });
+    const dates = cache?.orders || W.orderPeriod();
+    for (const [selector, key] of [["#orderStart", "start"], ["#orderEnd", "end"]]) {
+      const input = $(selector);
+      input.min = range.start;
+      input.max = range.end;
+      if (!input.value) input.value = dates[key];
+    }
+  }
+  stockMessage("#periodMessage");
+}
+
+function fillOrderPeriodForm() {
+  const selection = orderSelection(shop());
+  $("#orderPreset").value = "days" in selection ? String(selection.days) : "custom";
+  $("#orderStart").value = selection.start || "";
+  $("#orderEnd").value = selection.end || "";
+  updateOrderDateFields();
+  stockMessage("#exportMessage");
+}
+
+async function applyOrderPeriod() {
+  const s = shop();
+  if (!s || !cache || busy) return;
+  const preset = $("#orderPreset").value;
+  const selection = preset === "custom"
+    ? { start: $("#orderStart").value, end: $("#orderEnd").value }
+    : { days: Number(preset) };
+  const now = new Date();
+  let period;
+  try {
+    period = W.orderPeriod(selection, now);
+  } catch (e) {
+    stockMessage("#periodMessage", e.message, true);
+    return;
+  }
+  const notes = cache.notes || [];
+  if (cache.orders?.start === period.start && cache.orders.end === period.end
+      && !notes.some(note => note.startsWith(ORDER_LOAD_ERROR))) {
+    ui(`orders:${s.id}`, selection);
+    stockMessage("#periodMessage");
+    return;
+  }
+  setBusy(true);
+  const dates = orderDatesLabel(period);
+  const progress = message => stockMessage("#periodMessage", `Заказы за ${dates}. ${message}`);
+  try {
+    progress("Загружаю данные из WB…");
+    const orders = await W.fetchOrders(s.token, { period, now, progress });
+    const updated = { ...cache, orders, notes: notes.filter(note => !note.startsWith(ORDER_LOAD_ERROR)) };
+    await S.kvSet(S.cacheKey(s.id), updated);
+    cache = updated;
+    ui(`orders:${s.id}`, selection);
+    stockMessage("#periodMessage");
+  } catch (e) {
+    const suffix = cache.orders ? " В отчёте показан предыдущий период." : "";
+    stockMessage("#periodMessage", `Не удалось загрузить заказы за ${dates}. ${e.message}${suffix}`, true);
+  } finally {
+    setBusy(false);
+    await renderStocks();
+  }
+}
+
 function colorOf(c) {
   const m = { D1CFD7: "#9a96a6", FEE0E0: "#f08b8b", ECDAFF: "#b48af5", E4EAFF: "#7f9cf5", DEF1DD: "#6cc36a", FFECC7: "#f2b843" };
   if (!c) return "#bbb";
@@ -191,7 +294,7 @@ function colorOf(c) {
 
 async function renderStocks() {
   const s = shop();
-  $("#upd").textContent = cache && cache.updated ? `Данные от ${cache.updated} · карточек: ${cache.cards.length}` : (s ? "Данные ещё не загружены" : "");
+  $("#upd").textContent = cache && cache.updated ? `Данные от ${cache.updated} · товаров: ${cache.cards.length}` : (s ? "Данные ещё не загружены" : "");
   const notes = (cache && cache.notes) || [];
   $("#notes").style.display = notes.length ? "block" : "none";
   $("#notes").innerHTML = notes.map(esc).join("<br>");
@@ -200,15 +303,12 @@ async function renderStocks() {
   const cur = sel.value || ui(`cat:${s && s.id}`) || "";
   sel.innerHTML = cats.length ? cats.map(c => `<option value="${esc(c.name)}">${esc(c.name)} (${c.count})</option>`).join("") : `<option value="">— нет данных —</option>`;
   if (cats.some(c => c.name === cur)) sel.value = cur;
-  const pick = cats.find(c => c.name === sel.value);
-  $("#catInfo").textContent = pick ? `${pick.count} карточек` : "";
-  if (!busy && s && !cache) setStatus("info", "Нажмите «Обновить данные», чтобы загрузить товары и остатки из WB.");
   renderTags();
 }
 
 function renderTags() {
   const s = shop(), cat = $("#category").value;
-  if (!cat || !cache) { $("#tags").innerHTML = ""; renderReport(null); return; }
+  if (!cat || !cache) { selected.clear(); $("#tags").innerHTML = ""; renderReport(null); return; }
   ui(`cat:${s.id}`, cat);
   const tags = R.tagsForCategory(cache, cat);
   const saved = ui(`tags:${s.id}:${cat}`);
@@ -224,29 +324,36 @@ function renderTags() {
 }
 function saveTags() { const s = shop(); ui(`tags:${s.id}:${$("#category").value}`, [...selected]); }
 
-function currentReport() {
+function stockFilters() {
   const s = shop();
-  if (!cache || !$("#category").value || !selected.size) return null;
+  const subject = $("#category").value;
+  if (!s || !cache || !subject || !selected.size) return null;
   const stocks = cache.stocks || {};
   const source = (s.source || "all") in stocks ? (s.source || "all") : (Object.keys(stocks)[0] || "all");
-  const orders = cache.orders;
-  const orderDates = orders?.start ? `${displayDate(orders.start)} – ${displayDate(orders.end)} (МСК)` : null;
+  return { subject, tags: [...selected], source, includeZero: $("#zero").checked, sortBy: $("#stockSort").value };
+}
+
+function currentReport() {
+  const filters = stockFilters();
+  if (!filters) return null;
+  const { subject, tags, source, includeZero, sortBy } = filters;
   return {
-    groups: R.build(cache, $("#category").value, [...selected], source, $("#zero").checked, $("#stockSort").value),
-    source: R.SOURCES[source] || source, orderDates,
+    groups: R.build(cache, subject, tags, source, includeZero, sortBy),
+    source: R.SOURCES[source] || source, orderDates: orderDatesLabel(cache.orders),
   };
 }
 
 function renderReport(rep) {
   const grid = $("#grid"), sum = $("#summary");
   $("#stockSortControl").hidden = !rep?.groups.length;
-  if (!rep || !rep.groups.length) { grid.innerHTML = `<div class="empty">Выберите категорию и ярлыки</div>`; sum.innerHTML = ""; $("#btnExcel").disabled = true; return; }
-  const sku = rep.groups.reduce((a, g) => a + g.sku, 0), tot = rep.groups.reduce((a, g) => a + g.total, 0);
+  syncStockControls();
+  if (!rep || !rep.groups.length) { grid.innerHTML = `<div class="empty">Выберите категорию и ярлыки</div>`; sum.innerHTML = ""; return; }
+  const { sku, total } = R.summarize(rep.groups);
   $("#stockSort").disabled = !rep.groups.some(g => g.rows.some(r => r.ordersPerDay != null));
   const orderPeriod = rep.orderDates
     ? `Заказы по всем моделям за ${esc(rep.orderDates)}`
-    : "Обновите данные, чтобы загрузить заказы";
-  sum.innerHTML = `<div><b>${sku}</b> <span>артикулов</span></div><div><b>${tot}</b> <span>шт. всего</span></div><div><span>Источник остатков: ${esc(rep.source)}</span></div><div><span>${orderPeriod}</span></div>`;
+    : "Примените период, чтобы загрузить заказы";
+  sum.innerHTML = `<div><b>${sku}</b> <span>артикулов</span></div><div><b>${total}</b> <span>шт. всего</span></div><div><span>Источник остатков: ${esc(rep.source)}</span></div><div><span>${orderPeriod}</span></div>`;
   grid.innerHTML = rep.groups.map(g => {
     const n = g.named ? 4 : 3;
     const rows = g.rows.map(r => {
@@ -259,18 +366,67 @@ function renderReport(rep) {
       <tbody>${rows.join("") || `<tr><td colspan="${n}" class="muted">нет товаров</td></tr>`}</tbody>
       <tfoot><tr><td>Итого SKU:</td>${g.named ? "<td></td>" : ""}<td class="q">${g.sku}</td><td></td></tr></tfoot></table>`;
   }).join("");
-  $("#btnExcel").disabled = false;
 }
 
-async function downloadExcel() {
-  const rep = currentReport();
-  if (!rep) return;
+async function photosForExport(groups, fetchCategoryCards) {
+  const unique = new Map();
+  for (const group of groups) for (const row of group.rows) unique.set(row.nmID, row);
+  const rows = [...unique.values()];
+  if (rows.some(row => row.photoUrl === undefined)) {
+    // У данных, сохранённых до появления выгрузки фото, нет URL изображения.
+    try {
+      stockMessage("#exportMessage", "Получаю ссылки на фото из WB…");
+      const cards = await fetchCategoryCards();
+      const urls = new Map(cards.map(card => [card.nmID, card.photoUrl]));
+      for (const row of rows) if (row.photoUrl === undefined) row.photoUrl = urls.get(row.nmID);
+    } catch {
+      // Даже при недоступном каталоге можно выгрузить остатки и уже известные фото.
+    }
+  }
+  const photos = await loadPhotos(rows, (done, total) => stockMessage("#exportMessage", `Загружаю фото: ${done} из ${total}…`));
+  return { photos, missing: rows.length - photos.size };
+}
+
+async function downloadExcel(byCards = false) {
+  const filters = stockFilters();
+  if (busy || !filters) return;
+  const { subject, tags, source, includeZero, sortBy } = filters;
+  const s = shop();
+  const orders = cache.orders;
+  const withPhotos = $("#withPhotos").checked;
+  const withOrders = $("#withOrders").checked;
+  const fetchCategoryCards = () => {
+    const subjectIds = [...new Set(cache.cards.filter(c => c.subjectName === subject).map(c => c.subjectID).filter(Boolean))];
+    return W.fetchCards(s.token, { subjectIds, progress: m => stockMessage("#exportMessage", m) });
+  };
+  setBusy(true);
   try {
-    const buf = await toXlsx(rep.groups, window.ExcelJS, rep.orderDates);
+    let groups, photos, missing = 0;
+    if (byCards) {
+      stockMessage("#exportMessage", "Проверяю состав карточек в WB…");
+      const cards = await fetchCategoryCards();
+      groups = R.buildCardGroups({ ...cache, cards }, subject, tags, source, includeZero, sortBy);
+      if (!groups.length) {
+        stockMessage("#exportMessage", "Нет объединённых карточек с товарами по выбранным фильтрам.");
+        return;
+      }
+    } else {
+      groups = R.build(cache, subject, tags, source, includeZero, sortBy);
+    }
+    if (withPhotos) ({ photos, missing } = await photosForExport(groups, fetchCategoryCards));
+    stockMessage("#exportMessage", "Собираю Excel…");
+    const buf = await toXlsx(groups, window.ExcelJS, orderDatesLabel(orders), { byCards, photos, withOrders });
     const d = new Date(), p = n => String(n).padStart(2, "0");
+    const name = byCards ? "Остатки по карточкам" : "Остатки";
+    const period = withOrders && orders?.start ? ` (заказы ${orders.start} – ${orders.end})` : "";
     saveFile(new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
-      `Остатки ${p(d.getDate())}.${p(d.getMonth() + 1)} ${$("#category").value}.xlsx`);
-  } catch (e) { setStatus("err", "Не удалось собрать Excel: " + esc(e.message)); }
+      `${name} ${p(d.getDate())}.${p(d.getMonth() + 1)} ${subject}${period}.xlsx`);
+    stockMessage("#exportMessage", missing ? `Excel скачан. Фото недоступно для ${missing} из ${photos.size + missing} товаров.` : "Excel скачан.");
+  } catch (e) {
+    stockMessage("#exportMessage", `Не удалось скачать Excel. ${e.message}`, true);
+  } finally {
+    setBusy(false);
+  }
 }
 
 function saveFile(blob, name) {
@@ -319,11 +475,13 @@ async function startJob(kind, fn) {
 
 async function makePlanFromInput() {
   const s = shop();
+  if (!s || busy) return;
   const known = new Set(((cache && cache.cards) || []).map(c => c.vendorCode));
   let groups;
   try {
     groups = xlsxData ? await parseXlsx(xlsxData, known, window.ExcelJS) : C.parseText($("#cardsText").value, known);
   } catch (e) { alert("Не удалось прочитать список: " + e.message); return; }
+  if (busy || shop()?.id !== s.id) return;
   if (!groups.length) { alert("В списке не найдено ни одного артикула."); return; }
   plan = null; renderPlan();
   await startJob("plan", async () => {
@@ -408,17 +566,20 @@ async function renderSnaps() {
   const s = shop(), el = $("#snaps");
   if (!s) { el.innerHTML = ""; return; }
   const list = (await S.listSnapshots(s.id)).slice(0, 30);
+  if (shop()?.id !== s.id) return;
   if (!list.length) { el.innerHTML = `<div class="muted">Пока ничего не выполнялось.</div>`; return; }
   el.innerHTML = list.map(x => `<div class="snap"><div class="grow"><b>${esc(x.time)}</b> · ${esc(x.label || "")}<br>
     <span class="muted">${esc(x.summary || "не закончено")} · снимок: ${(x.before || []).reduce((a, g) => a + g.length, 0)} товаров в ${(x.before || []).length} карточках${x.rolledBack ? " · <b>откачено " + esc(x.rolledBack) + "</b>" : ""}</span></div>
     <button class="ghost" data-dl="${esc(x.key)}">Скачать</button><button data-rb="${esc(x.key)}">Откатить</button></div>`).join("");
   $$("#snaps [data-dl]").forEach(b => b.onclick = async () => {
     const x = await S.kvGet(b.dataset.dl);
+    if (!x || shop()?.id !== s.id) return;
     saveFile(new Blob([JSON.stringify(Object.assign({ app: "ostatki-wb", shop: s.name }, x), null, 1)], { type: "application/json" }),
       `Снимок ${s.name} ${x.time.replace(/[:/]/g, "-")}.json`);
   });
   $$("#snaps [data-rb]").forEach(b => b.onclick = async () => {
     const x = await S.kvGet(b.dataset.rb);
+    if (!x || busy || shop()?.id !== s.id) return;
     if (!confirm(`Откатить магазин «${s.name}» к состоянию до ${x.time}?`)) return;
     await runGroups(C.snapshotGroups(x.before), `Откат к ${x.time}`, b.dataset.rb);
   });
@@ -426,8 +587,10 @@ async function renderSnaps() {
 
 async function rollbackFromFile(file) {
   const s = shop();
+  if (!s || busy) return;
   let x;
   try { x = JSON.parse(await file.text()); } catch (e) { alert("Это не файл снимка."); return; }
+  if (busy || shop()?.id !== s.id) return;
   if (!x || !Array.isArray(x.before) || !x.before.every(g => Array.isArray(g) && g.every(n => Number.isInteger(n)))) { alert("Это не файл снимка «Остатки WB»."); return; }
   if (x.shop && x.shop !== s.name && !confirm(`Снимок сделан для магазина «${x.shop}», а выбран «${s.name}». Всё равно продолжить?`)) return;
   if (!confirm(`Откатить магазин «${s.name}» к состоянию из файла (${x.time || "без даты"})?`)) return;
@@ -475,16 +638,27 @@ function wire() {
   $("#stockSort").onchange = () => renderReport(currentReport());
   $("#allTags").onclick = () => { $$(".chip").forEach(c => { selected.add(c.dataset.n); c.classList.add("on"); }); saveTags(); renderReport(currentReport()); };
   $("#noTags").onclick = () => { selected.clear(); $$(".chip").forEach(c => c.classList.remove("on")); saveTags(); renderReport(currentReport()); };
-  $("#btnExcel").onclick = downloadExcel;
+  const showCustomOrderHint = () => stockMessage("#periodMessage", "Нажмите «Применить», чтобы загрузить заказы за указанные даты.");
+  $("#orderPreset").onchange = () => {
+    updateOrderDateFields();
+    if ($("#orderPreset").value === "custom") showCustomOrderHint();
+    else applyOrderPeriod();
+  };
+  $("#orderStart").oninput = $("#orderEnd").oninput = showCustomOrderHint;
+  $("#orderForm").onsubmit = e => { e.preventDefault(); applyOrderPeriod(); };
+  $("#btnExcel").onclick = () => downloadExcel();
+  $("#btnCardExcel").onclick = () => downloadExcel(true);
   $("#cardsText").oninput = () => { const s = shop(); if (s) ui(`text:${s.id}`, $("#cardsText").value); };
   $("#btnXlsx").onclick = () => $("#xlsxFile").click();
   $("#xlsxFile").onchange = async () => {
-    const f = $("#xlsxFile").files[0];
-    if (!f) return;
-    xlsxData = await f.arrayBuffer();
+    const s = shop(), f = $("#xlsxFile").files[0];
+    $("#xlsxFile").value = "";
+    if (!f || !s || busy) return;
+    const data = await f.arrayBuffer();
+    if (busy || shop()?.id !== s.id) return;
+    xlsxData = data;
     $("#xlsxName").innerHTML = `${esc(f.name)} <button class="ghost" id="xlsxClear">убрать</button>`;
     $("#xlsxClear").onclick = () => { xlsxData = null; $("#xlsxName").textContent = ""; };
-    $("#xlsxFile").value = "";
     makePlanFromInput();
   };
   $("#btnPlan").onclick = () => {

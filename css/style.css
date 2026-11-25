@@ -36,6 +36,16 @@ select,input[type=password],input[type=text]{font:inherit;padding:9px 12px;borde
 .stock-details .summary{margin-bottom:0;row-gap:8px}
 .stock-sort:not([hidden]){display:flex;align-items:center;gap:8px}
 .stock-sort select{min-width:0;width:auto;padding:6px 8px;color:var(--ink)}
+.stock-heading,.order-form,.stock-export{margin-bottom:14px}
+.order-controls{align-items:flex-end;border:0;padding:0;margin:0;min-width:0}
+.order-controls [hidden]{display:none}
+.order-controls select,.order-controls input,.order-controls button,.stock-export button{min-height:44px}
+.order-field{display:grid;gap:4px;color:var(--muted);font-size:13px}
+.order-field select,.order-field input{min-width:0;width:auto;color:var(--ink)}
+.order-field input{font:inherit;font-size:15px;padding:7px 9px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.order-controls :focus-visible,.stock-export :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.stock-message{margin:8px 0 12px}
+.stock-message.error{color:#a12727}
 .grid .orders-col{white-space:nowrap}
 .grid{display:flex;gap:14px;overflow-x:auto;padding-bottom:8px;align-items:flex-start}
 table{border-collapse:collapse;font-size:14px;min-width:190px;background:#fff}
@@ -89,3 +99,4 @@ ul.msgs.err{color:var(--err)} ul.msgs.warn{color:#8a5a00}
   #shopSelect{width:auto;flex:1}
   .grid .orders-col{white-space:normal}
 }
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
