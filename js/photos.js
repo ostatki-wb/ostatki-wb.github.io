@@ -1,4 +1,4 @@
-const MAX_SIDE = 688;
+const MAX_SIDE = 344;
 const TIMEOUT_MS = 12000;
 const CONCURRENT_DOWNLOADS = 6;
 

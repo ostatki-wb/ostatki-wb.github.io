@@ -96,6 +96,7 @@ test("Excel: скорость числом, период и формула SKU, 
   assert.equal(sheet.getCell("D2").value, "Заказов в день");
   assert.match(sheet.getCell("D2").note, /22\.10\.2026.*20\.11\.2026/);
   assert.equal(sheet.getCell("D3").value, 221 / 30);
+  assert.equal(sheet.getCell("D3").font.size, 12);
   assert.equal(sheet.getCell("D3").numFmt, "0.00");
   assert.equal(sheet.getCell("D5").value, 0);
   assert.equal(sheet.getCell("D6").value, null);
@@ -112,6 +113,11 @@ test("Excel: столбец фото доступен отдельно от за
     const book = await new ExcelJS.Workbook().xlsx.load(xlsx);
     const sheet = book.worksheets[0];
     assert.deepEqual(sheet.getRow(2).values.slice(1), ["Артикул", "Кол-во", "Фото"]);
+    assert.equal(sheet.properties.defaultRowHeight, 18);
+    for (const address of ["A1", "A2", "A3", "A4"]) {
+      assert.equal(sheet.getCell(address).font.name, "Arial");
+      assert.equal(sheet.getCell(address).font.size, 12);
+    }
     assert.equal(sheet.getCell("B4").result, 1);
     assert.deepEqual(await parseXlsx(xlsx, new Set(["А1", "8", "Фото"]), ExcelJS), [
       { name: byCards ? "Карточка 1" : "Река", items: ["А1"] },

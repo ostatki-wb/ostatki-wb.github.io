@@ -3,25 +3,37 @@
 
 const THIN = { style: "thin" };
 const BORDER = { left: THIN, right: THIN, top: THIN, bottom: THIN };
-const F_HEAD = { name: "Arial", size: 11, bold: true, color: { argb: "FFFFFFFF" } };
-const F_BOLD = { name: "Arial", size: 11, bold: true };
-const F_REG = { name: "Arial", size: 11 };
+const F_REG = { name: "Arial", size: 12 };
+const F_BOLD = { ...F_REG, bold: true };
+const F_HEAD = { ...F_BOLD, color: { argb: "FFFFFFFF" } };
 const FILL_HEAD = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4472C4" } };
 const FILL_SUB = { type: "pattern", pattern: "solid", fgColor: { argb: "FFD9E1F2" } };
-const CENTER = { horizontal: "center" };
+const MIDDLE = { vertical: "middle" };
+const CENTER = { ...MIDDLE, horizontal: "center" };
+const WRAP = { ...MIDDLE, wrapText: true };
 const ORDERS_HEADER = "Заказов в день";
 const PHOTO_HEADER = "Фото";
 const CARD_SHEET = "По карточкам";
 const MAX_COLUMNS = 16384;
+const DEFAULT_ROW_HEIGHT = 18;
+const PHOTO_WIDTH = 72;
+const PHOTO_HEIGHT = 86;
 const PHOTO_PADDING = 4;
 const EMU_PER_PIXEL = 9525;
 
+function reportSheet(wb, name) {
+  const ws = wb.addWorksheet(name, { properties: { defaultRowHeight: DEFAULT_ROW_HEIGHT } });
+  ws.getRow(1).height = 23;
+  ws.getRow(2).height = 22;
+  return ws;
+}
+
 function addPhoto(ws, imageId, photo, col, row) {
-  const scale = Math.min(144 / photo.width, 172 / photo.height);
+  const scale = Math.min(PHOTO_WIDTH / photo.width, PHOTO_HEIGHT / photo.height);
   const width = Math.max(1, Math.round(photo.width * scale));
   const height = Math.max(1, Math.round(photo.height * scale));
   const sheetRow = ws.getRow(row);
-  sheetRow.height = Math.max(sheetRow.height || 0, (height + PHOTO_PADDING * 2) * 0.75);
+  sheetRow.height = Math.max(sheetRow.height || DEFAULT_ROW_HEIGHT, (height + PHOTO_PADDING * 2) * 0.75);
   const offset = PHOTO_PADDING * EMU_PER_PIXEL;
   ws.addImage(imageId, {
     tl: { nativeCol: col - 1, nativeColOff: offset, nativeRow: row - 1, nativeRowOff: offset },
@@ -44,15 +56,15 @@ export async function toXlsx(groups, ExcelJS, orderDates = null, {
   const wb = new ExcelJS.Workbook();
   const imageIds = new Map();
   const sheetName = byCards ? CARD_SHEET : "Остатки";
-  let ws = wb.addWorksheet(sheetName);
+  let ws = reportSheet(wb, sheetName);
   let col = 1;
   for (const g of groups) {
-    const cols = [["Артикул", "article", 14]].concat(g.named ? [["Название", "name", 30]] : [], [["Кол-во", "qty", 8]]);
+    const cols = [["Артикул", "article", 16]].concat(g.named ? [["Название", "name", 34]] : [], [["Кол-во", "qty", 10]]);
     const qtyOffset = cols.length - 1;
-    if (withOrders) cols.push([ORDERS_HEADER, "ordersPerDay", 19]);
-    if (photos) cols.push([PHOTO_HEADER, "photo", 23]);
+    if (withOrders) cols.push([ORDERS_HEADER, "ordersPerDay", 20]);
+    if (photos) cols.push([PHOTO_HEADER, "photo", 12]);
     if (col + cols.length - 1 > MAX_COLUMNS) {
-      ws = wb.addWorksheet(`${sheetName} ${wb.worksheets.length + 1}`);
+      ws = reportSheet(wb, `${sheetName} ${wb.worksheets.length + 1}`);
       col = 1;
     }
     const qtyCol = col + qtyOffset;
@@ -81,7 +93,7 @@ export async function toXlsx(groups, ExcelJS, orderDates = null, {
         cell.value = v === "" || v === undefined ? null : v;
         if (key === "ordersPerDay") cell.numFmt = "0.00";
         cell.font = F_REG; cell.border = BORDER;
-        if (photos) cell.alignment = { vertical: "middle" };
+        cell.alignment = key === "name" ? WRAP : MIDDLE;
       });
       const photo = photos?.get(row.nmID);
       if (photo) {
@@ -96,7 +108,7 @@ export async function toXlsx(groups, ExcelJS, orderDates = null, {
       const cell = ws.getCell(r, c);
       if (c === first) cell.value = "Итого SKU:";
       else if (c === qtyCol) cell.value = lastRow >= 3 ? { formula: `COUNTA(${a}3:${a}${lastRow})`, result: sku } : 0;
-      cell.font = F_BOLD; cell.fill = FILL_SUB; cell.border = BORDER;
+      cell.font = F_BOLD; cell.fill = FILL_SUB; cell.alignment = MIDDLE; cell.border = BORDER;
     }
     col = last + 2;
   }
