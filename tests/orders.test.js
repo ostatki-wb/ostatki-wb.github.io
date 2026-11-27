@@ -121,9 +121,10 @@ test("Excel: столбец фото доступен отдельно от за
 
 test("Карточки: все варианты сохраняются, даже если только один есть в наличии", async () => {
   const subject = "Алмазная мозаика";
-  const item = (nmID, imtID, vendorCode, tags) => ({ nmID, imtID, vendorCode, tags, subjectName: subject });
-  const first = item(1, 50, "KWA0282", ["Река", "Лебеди"]);
-  const cards = [first, item(2, 50, "SWA0139", ["Горы"]), first,
+  const item = (nmID, imtID, vendorCode, tags, title) => ({ nmID, imtID, vendorCode, tags, title, subjectName: subject });
+  const first = item(1, 50, "KWA0282", ["Река", "Лебеди"], "Алмазная мозаика 40х50 см без подрамника Еда KWA0282");
+  const swans = item(2, 50, "SWA0139", ["Горы"], "Алмазная мозаика 40х50 см без подрамника Лебеди SWA0139");
+  const cards = [first, swans, first,
     item(3, 90, "", ["Река"]), item(4, 90, "Нет остатков", []),
     item(5, 99, "Одиночный", ["Река"]), item(6, null, "D", ["Река"]), item(7, null, "E", ["Река"])];
   const cache = { cards, stocks: { wb: { 1: 1, 5: 90, 6: 6, 7: 8 } }, orders: { days: 7, counts: { 1: 0, 2: 14 } } };
@@ -138,10 +139,13 @@ test("Карточки: все варианты сохраняются, даже
   const book = await new ExcelJS.Workbook().xlsx.load(xlsx);
   const sheet = book.getWorksheet("По карточкам");
   assert.equal(sheet.getCell("A1").value, "Карточка 1");
-  assert.equal(sheet.getCell("B5").formula, "COUNTA(A3:A4)");
-  assert.equal(sheet.getCell("B5").result, 2);
-  assert.equal(sheet.getCell("B4").value, 0);
-  assert.equal(sheet.getCell("C4").value, 2);
+  assert.deepEqual(sheet.getRow(2).values.slice(1), ["Артикул", "Название", "Кол-во", "Заказов в день"]);
+  assert.equal(sheet.getCell("B3").value, "Еда");
+  assert.equal(sheet.getCell("B4").value, "Лебеди");
+  assert.equal(sheet.getCell("C5").formula, "COUNTA(A3:A4)");
+  assert.equal(sheet.getCell("C5").result, 2);
+  assert.equal(sheet.getCell("C4").value, 0);
+  assert.equal(sheet.getCell("D4").value, 2);
   assert.deepEqual(await parseXlsx(xlsx, new Set(["KWA0282", "SWA0139", "0", "1", "2"]), ExcelJS), [
     { name: "Карточка 1", items: ["KWA0282", "SWA0139"] },
   ]);

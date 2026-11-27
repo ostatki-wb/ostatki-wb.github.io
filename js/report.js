@@ -12,7 +12,7 @@ export const SOURCES = {
 };
 export const STOCK_TYPE = { all: "", wb: "wb", mp: "mp" };
 
-// категории (предметы), у которых в отчёт добавляется колонка «Название» — для всех ярлыков
+// категории (предметы), у которых в отчётах добавляется колонка «Название»
 export const NAMED_SUBJECTS = new Set(["алмазная мозаика", "картины по номерам", "наборы для вышивания"]);
 
 // В JavaScript \b не понимает кириллицу — границы слова задаём явно.
@@ -90,16 +90,18 @@ function cardTags(card) {
   return card.tags?.length ? card.tags : [NO_TAG];
 }
 
-function stockRow(card, stocks, orders) {
+function stockRow(card, stocks, orders, named) {
   const article = String(card.vendorCode ?? "");
   const count = orders?.counts?.[card.nmID];
-  return {
+  const row = {
     article: article.trim() ? article : String(card.nmID),
     nmID: card.nmID,
     qty: parseInt(stocks[String(card.nmID)] || 0, 10),
     ordersPerDay: count == null ? undefined : count / orders.days,
     photoUrl: card.photoUrl,
   };
+  if (named) row.name = shortName(card.title, card.vendorCode);
+  return row;
 }
 
 function compareRows(sortBy) {
@@ -120,9 +122,8 @@ export function build(cache, subject, tags, source, includeZero, sortBy = "stock
   const named = isNamed(subject);
   for (const c of (cache && cache.cards) || []) {
     if (c.subjectName !== subject) continue;
-    const row = stockRow(c, stocks, orders);
+    const row = stockRow(c, stocks, orders, named);
     if (row.qty <= 0 && !includeZero) continue;
-    if (named) row.name = shortName(c.title, c.vendorCode);
     for (const t of cardTags(c)) groups.get(t)?.push(row);
   }
   const compare = compareRows(sortBy);
@@ -145,6 +146,7 @@ export function summarize(groups) {
 export function buildCardGroups(cache, subject, tags, source, includeZero, sortBy = "stock") {
   const wanted = new Set(tags);
   const stocks = stockMap(cache, source);
+  const named = isNamed(subject);
   const members = new Map();
   const seen = new Set();
   for (const card of cache?.cards || []) {
@@ -161,9 +163,9 @@ export function buildCardGroups(cache, subject, tags, source, includeZero, sortB
   for (const [, cards] of [...members].sort(([a], [b]) => a - b)) {
     // Фильтры отбирают карточки целиком. В состав каждой выбранной карточки входят и товары без остатка.
     if (cards.length < 2 || !cards.some(c => cardTags(c).some(t => wanted.has(t)))) continue;
-    const rows = cards.map(c => stockRow(c, stocks, cache.orders));
+    const rows = cards.map(c => stockRow(c, stocks, cache.orders, named));
     if (!includeZero && !rows.some(row => row.qty > 0)) continue;
-    groups.push({ name: `Карточка ${groups.length + 1}`, rows: rows.sort(compare) });
+    groups.push({ name: `Карточка ${groups.length + 1}`, rows: rows.sort(compare), named });
   }
   return groups;
 }
