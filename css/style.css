@@ -74,7 +74,7 @@ tfoot td{background:var(--sub);font-weight:700}
 .shop .grow b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .spin{display:inline-block;width:14px;height:14px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;animation:s .8s linear infinite;vertical-align:-2px;margin-right:8px}
 @keyframes s{to{transform:rotate(360deg)}}
-nav.tabs{display:flex;gap:4px;margin:0 0 16px}
+nav.tabs{display:flex;flex-wrap:wrap;gap:4px;margin:0 0 16px}
 nav.tabs button{background:transparent;color:var(--muted);border-radius:10px 10px 0 0;border-bottom:2px solid transparent;padding:10px 16px}
 nav.tabs button.on{color:var(--ink);border-bottom-color:var(--accent)}
 .banner{border-radius:10px;padding:10px 14px;margin-bottom:16px;font-size:14px;font-weight:500;background:#fff4dc;color:#7a4b00;border:1.5px solid #f0c060}
@@ -93,10 +93,36 @@ ul.msgs.err{color:var(--err)} ul.msgs.warn{color:#8a5a00}
 .snap{display:flex;gap:12px;align-items:center;padding:10px 0;border-top:1px solid var(--line);font-size:14px;flex-wrap:wrap}
 .snap:first-child{border-top:0}
 .snap .grow{flex:1;min-width:200px}
+.recommendation-controls{border:0;margin:0;padding:0;min-inline-size:0}
+.recommendation-controls.row{align-items:flex-end}
+.recommendation-field{display:grid;gap:6px;font-weight:600;min-width:0}
+.recommendation-field input,.recommendation-controls button{min-height:44px}
+.recommendation-field textarea{min-height:96px;color:var(--ink);font-weight:400}
+.recommendation-controls :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.recommendation-controls [aria-invalid=true]{border-color:var(--err)}
+.recommendation-heading{justify-content:space-between;margin-bottom:12px}
+.recommendation-heading h2{margin:0 0 4px}
+.recommendation-heading p{margin:0;overflow-wrap:anywhere}
+.recommendation-list{margin:8px 0 18px;padding:0;list-style:none;border-block:1px solid var(--line)}
+.recommendation-item{display:grid;grid-template-columns:minmax(0,1fr) minmax(5.5rem,auto) auto;gap:12px;align-items:center;padding:8px 0}
+.recommendation-item+.recommendation-item{border-top:1px solid var(--line)}
+.recommendation-article{overflow-wrap:anywhere}
+.recommendation-quantity{font-variant-numeric:tabular-nums;text-align:right}
+.recommendation-quantity.zero{color:#a12727;font-weight:600}
+.recommendation-change{display:block;font-size:13px;color:#4b2a9a}
+.recommendation-actions{justify-content:flex-end;margin-top:12px}
+.recommendation-message{margin:8px 0 0;font-size:14px;overflow-wrap:anywhere}
+.recommendation-message.error{color:#a12727}
+.recommendation-message:empty{margin:0}
 @media (max-width:640px){
   header,main{padding-left:16px;padding-right:16px}
   select,input[type=password],input[type=text]{min-width:0;width:100%}
   #shopSelect{width:auto;flex:1}
   .grid .orders-col{white-space:normal}
+}
+@media (max-width:420px){
+  nav.tabs button{padding-inline:8px}
+  .recommendation-controls.row>.recommendation-field{width:100%}
+  .recommendation-item{grid-template-columns:minmax(0,1fr) auto auto;gap:6px}
 }
 @media (prefers-reduced-motion:reduce){.spin{animation:none}}

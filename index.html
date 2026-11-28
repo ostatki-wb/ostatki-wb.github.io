@@ -29,13 +29,17 @@
   </div>
   <div id="welcome" class="panel" style="display:none">
     <h2>Добро пожаловать</h2>
-    <p>Здесь можно смотреть остатки своих товаров на Wildberries по категориям и ярлыкам, выгружать их в Excel и объединять карточки.</p>
+    <p>Здесь можно смотреть остатки товаров на Wildberries, выгружать их в Excel, объединять карточки и управлять рекомендациями.</p>
     <p class="muted">Всё работает прямо в этом браузере: токен и данные хранятся только у вас и отправляются только в WB.</p>
     <button class="primary" id="welcomeAdd">Добавить магазин</button>
   </div>
 
   <div id="workspace" style="display:none">
-    <nav class="tabs"><button data-tab="stocks">Остатки</button><button data-tab="cards">Карточки</button></nav>
+    <nav class="tabs" aria-label="Разделы магазина">
+      <button data-tab="stocks" aria-controls="tab-stocks">Остатки</button>
+      <button data-tab="cards" aria-controls="tab-cards">Карточки</button>
+      <button data-tab="recommendations" aria-controls="tab-recommendations">Рекомендации</button>
+    </nav>
     <div id="status" class="status" role="status"></div>
     <div id="notes" class="notes"></div>
 
@@ -104,7 +108,7 @@
       </div>
     </section>
 
-    <section id="tab-cards" style="display:none">
+    <section id="tab-cards" hidden>
       <div class="banner" id="shopBanner"></div>
       <div class="panel">
         <h2>1. Список карточек</h2>
@@ -151,6 +155,48 @@ PWA0063"></textarea>
         <div id="snaps"><div class="muted">Пока ничего не выполнялось.</div></div>
       </div>
     </section>
+
+    <section id="tab-recommendations" aria-label="Продавец рекомендует" hidden>
+      <div class="panel">
+        <h2>Продавец рекомендует</h2>
+        <form id="recommendationLookup">
+          <fieldset id="recommendationLookupFields" class="recommendation-controls row">
+            <label class="recommendation-field" for="recommendationMain">Основной артикул
+              <input id="recommendationMain" type="text" autocomplete="off" spellcheck="false" placeholder="Артикул продавца или WB" aria-describedby="recommendationLookupMessage">
+            </label>
+            <button id="recommendationOpen" type="submit" class="primary" disabled>Загрузить рекомендации</button>
+          </fieldset>
+          <p id="recommendationLookupMessage" class="recommendation-message" role="status"></p>
+        </form>
+      </div>
+      <div id="recommendationEditor" class="panel" hidden>
+        <div class="row recommendation-heading">
+          <div>
+            <h2>Список рекомендаций</h2>
+            <p id="recommendationProduct"></p>
+          </div>
+          <p id="recommendationCount" class="muted" role="status"></p>
+        </div>
+        <p id="recommendationEmpty" class="empty">У этого товара пока нет рекомендаций.</p>
+        <p id="recommendationStockSource" class="muted recommendation-message"></p>
+        <p id="recommendationStockMessage" class="recommendation-message" role="status"></p>
+        <form id="recommendationEdit">
+          <fieldset id="recommendationEditFields" class="recommendation-controls">
+            <ul id="recommendationList" class="recommendation-list" aria-label="Рекомендации и остатки"></ul>
+            <label class="recommendation-field" for="recommendationText">Добавить артикулы
+              <textarea id="recommendationText" spellcheck="false" aria-describedby="recommendationTextHint recommendationEditMessage" placeholder="CN0139, CN0138, 123456789"></textarea>
+            </label>
+            <p id="recommendationTextHint" class="muted recommendation-message">Вставьте артикулы продавца или WB. Подойдут пробелы, запятые или новые строки.</p>
+            <div class="row recommendation-actions">
+              <button type="submit" id="recommendationCheck" disabled>Проверить</button>
+              <button type="button" id="recommendationApply" class="primary" aria-describedby="recommendationPending" disabled>Применить</button>
+            </div>
+            <p id="recommendationPending" class="muted recommendation-message"></p>
+          </fieldset>
+        </form>
+        <p id="recommendationEditMessage" class="recommendation-message" role="status"></p>
+      </div>
+    </section>
   </div>
 </main>
 
@@ -173,7 +219,7 @@ PWA0063"></textarea>
       <ol>
         <li>В кабинете WB: «Профиль» → «Настройки» → «Доступ к API» → «Создать токен».</li>
         <li>Категории: <b>Контент</b> и <b>Аналитика</b>.</li>
-        <li>Если нужны только остатки и Excel — отметьте «Только чтение». Для объединения карточек «Только чтение» не ставьте.</li>
+        <li>Для объединения карточек и изменения рекомендаций нужен токен с правом записи.</li>
         <li>Скопируйте токен целиком и вставьте сюда.</li>
       </ol>
     </details>

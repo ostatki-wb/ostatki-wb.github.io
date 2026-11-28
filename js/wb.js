@@ -122,6 +122,52 @@ export async function sellerName(token) {
   } catch (e) { return ""; }
 }
 
+// ---------- «Продавец рекомендует» ----------
+
+const RECOMMENDATIONS = CONTENT + "/api/content/v1/recommendations";
+export const MAX_RECOMMENDATIONS = 20;
+
+async function recommendationRequest(action, token, body, options) {
+  try {
+    return await request("POST", `${RECOMMENDATIONS}/${action}`, token, body, options);
+  } catch (e) {
+    if (e.status === 402) {
+      throw new WBError("Проверьте подписку «Джем» или опцию «Продавец рекомендует» в кабинете WB.", e.status);
+    }
+    if (e.status === 403) {
+      const access = action === "set" ? " с правом записи" : "";
+      throw new WBError(`Проверьте, что в настройках магазина указан персональный или сервисный токен «Контент»${access}, а в кабинете WB подключены рекомендации.`, e.status);
+    }
+    throw e;
+  }
+}
+
+export async function fetchRecommendations(token, nmId, options) {
+  const res = await recommendationRequest("list", token, { search: String(nmId), limit: MAX_RECOMMENDATIONS }, options);
+  if (!res || (!Array.isArray(res.data) && res.data !== null)) {
+    throw new WBError("WB вернул список рекомендаций в неожиданном формате.");
+  }
+  const item = res.data?.find(row => row?.nmId === nmId);
+  const ids = item?.recomNms;
+  if (ids == null && !item?.recomCount) return [];
+  if (!Array.isArray(ids) || ids.some(id => !Number.isSafeInteger(id) || id <= 0)
+      || (item.recomCount != null && item.recomCount !== ids.length)) {
+    throw new WBError("WB вернул неполный список рекомендаций. Повторите загрузку.");
+  }
+  return [...new Set(ids)];
+}
+
+export async function replaceRecommendations(token, nmId, ids, options) {
+  const recommendations = ids.map((recomNm, i) => ({ recomNm, sort: i + 1 }));
+  const res = await recommendationRequest("set", token, {
+    recList: [{ nmId, recommendations }], replace: true,
+  }, { ...options, retries: 0 });
+  const errors = res?.errors?.map(error => [error.recomNm, error.message].filter(Boolean).join(" — ")) || [];
+  if (res?.isError || errors.length) {
+    throw new WBError(errors.filter(Boolean).join(" · ") || "WB сообщил об ошибке при обновлении рекомендаций.");
+  }
+}
+
 // ---------- остатки ----------
 // Колонка «Остаток» в «Товары и цены» = отчёт «Остатки» в Аналитике (stocks-report), stockType="" —
 // склады WB + свои склады. Проверено: совпадает с кабинетом.
@@ -135,7 +181,9 @@ function today() {
 }
 
 /** Текущие остатки: { nmID (строкой): шт }. Товаров без остатков WB в отчёте не возвращает. */
-export async function fetchStocks(token, stockType = "", { progress = () => {}, pause = 21000 } = {}) {
+export async function fetchStocks(token, stockType = "", {
+  progress = () => {}, pause = 21000, nmIDs, fetchImpl = globalThis.fetch, retries = 3,
+} = {}) {
   if (!STOCK_TYPES.includes(stockType)) stockType = "";
   const day = today(), out = {};
   for (let offset = 0; ; offset += 1000) {
@@ -144,7 +192,8 @@ export async function fetchStocks(token, stockType = "", { progress = () => {}, 
       availabilityFilters: ["deficient", "actual", "balanced", "nonActual", "nonLiquid", "invalidData"],
       orderBy: { field: "stockCount", mode: "desc" }, limit: 1000, offset,
     };
-    const res = (await request("POST", ANALYTICS + "/api/v2/stocks-report/products/products", token, body, { progress })) || {};
+    if (nmIDs?.length) body.nmIDs = nmIDs;
+    const res = (await request("POST", ANALYTICS + "/api/v2/stocks-report/products/products", token, body, { progress, fetchImpl, retries })) || {};
     const items = (res.data || {}).items;
     if (!Array.isArray(items)) throw new WBError("WB вернул остатки в неожиданном формате (нет data.items).");
     for (const it of items) {

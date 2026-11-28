@@ -5,6 +5,7 @@ import * as C from "./cards.js";
 import * as S from "./store.js";
 import { toXlsx, parseXlsx } from "./excel.js";
 import { loadPhotos } from "./photos.js";
+import { createRecommendations } from "./recommendations.js";
 
 const $ = s => document.querySelector(s);
 const $$ = s => [...document.querySelectorAll(s)];
@@ -38,6 +39,7 @@ function setBusy(b) {
   $("#shopSelect").disabled = b;
   $("#btnShops").disabled = b;
   syncStockControls();
+  recommendations.sync();
   if (plan) renderPlan();
 }
 window.addEventListener("beforeunload", e => { if (busy) { e.preventDefault(); e.returnValue = ""; } });
@@ -56,6 +58,7 @@ async function selectShop(id) {
   setBusy(true);
   st.current = id; save();
   cache = null;
+  recommendations.reset();
   plan = null; planInput = null; job = null; xlsxData = null;
   $("#category").value = "";
   $("#snaps").replaceChildren();
@@ -196,6 +199,7 @@ async function refresh() {
     setStatus("err", esc(e.message));
   } finally {
     setBusy(false);
+    recommendations.render();
     await renderStocks();
   }
 }
@@ -600,9 +604,12 @@ async function rollbackFromFile(file) {
 // ---------- общее ----------
 
 function showTab(t) {
-  $$("nav.tabs button").forEach(b => b.classList.toggle("on", b.dataset.tab === t));
-  $("#tab-stocks").style.display = t === "stocks" ? "" : "none";
-  $("#tab-cards").style.display = t === "cards" ? "" : "none";
+  $$("nav.tabs button").forEach(button => {
+    const active = button.dataset.tab === t;
+    button.classList.toggle("on", active);
+    button.setAttribute("aria-pressed", active);
+    document.getElementById(button.getAttribute("aria-controls")).hidden = !active;
+  });
   ui("tab", t);
 }
 
@@ -674,6 +681,7 @@ function wire() {
   $("#snapFile").onchange = async () => { const f = $("#snapFile").files[0]; $("#snapFile").value = ""; if (f) await rollbackFromFile(f); };
 }
 
+const recommendations = createRecommendations({ shop, cache: () => cache, isBusy: () => busy, setBusy, esc });
 wire();
 showTab(ui("tab") || "stocks");
 if (st.current && !shop()) st.current = st.shops[0] ? st.shops[0].id : null;
